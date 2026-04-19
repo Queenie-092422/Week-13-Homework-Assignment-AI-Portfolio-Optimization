@@ -1,0 +1,381 @@
+---
+title: "Week 13 Homework: AI Portfolio Optimization"
+author: "Monet Knupp"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    number_sections: true
+    theme: simplex
+---
+
+```{css, echo=FALSE}
+body {
+  text-align: justify;
+}
+
+h1.title {
+  text-align: center;
+  font-weight: bold;
+}
+
+h4.author, h4.date {
+  text-align: center;
+}
+
+img {
+  display: block;
+  margin-left: auto;
+  margin-right: auto;
+}
+```
+
+## Overview
+
+This notebook evaluates a diversified ETF universe using adjusted closing prices from Yahoo Finance over the last three years. The analysis computes return and risk statistics, visualizes cross-asset correlations, splits the sample into training and test periods, and compares four portfolio construction approaches: Mean-Variance Optimization, Equal Weight, Risk Parity, and a 60/40 benchmark. The backtest is intentionally conducted out of sample so that portfolio weights are estimated on the training period and then evaluated on the test period.
+
+```{r setup-and-packages, message=FALSE, warning=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.align = "center"
+)
+
+options(repos = c(CRAN = "https://cloud.r-project.org"))
+
+required_packages <- c(
+  "quantmod",
+  "xts",
+  "zoo",
+  "PerformanceAnalytics",
+  "PortfolioAnalytics",
+  "ROI",
+  "ROI.plugin.quadprog",
+  "ROI.plugin.glpk",
+  "riskParityPortfolio",
+  "corrplot",
+  "knitr"
+)
+
+installed_packages <- rownames(installed.packages())
+missing_packages <- setdiff(required_packages, installed_packages)
+
+if (length(missing_packages) > 0) {
+  install.packages(missing_packages, dependencies = TRUE)
+}
+
+invisible(lapply(required_packages, library, character.only = TRUE))
+```
+
+## Investment universe
+
+The investment universe includes ten exchange-traded funds representing U.S. equities, international equities, fixed income, real estate, and gold.
+
+```{r investment-universe}
+etf_symbols <- c(
+  "SPY", "QQQ", "IWM", "VEA", "VWO",
+  "AGG", "TLT", "LQD", "VNQ", "GLD"
+)
+
+asset_classes <- data.frame(
+  ETF = etf_symbols,
+  Asset_Class = c(
+    "U.S. Large-Cap Equity",
+    "U.S. Large-Cap Growth Equity",
+    "U.S. Small-Cap Equity",
+    "Developed International Equity",
+    "Emerging Markets Equity",
+    "Core U.S. Bonds",
+    "Long-Term U.S. Treasuries",
+    "Investment-Grade Corporate Bonds",
+    "U.S. Real Estate",
+    "Gold"
+  )
+)
+
+knitr::kable(asset_classes, caption = "ETF investment universe")
+```
+
+## Download adjusted prices
+
+```{r download-adjusted-prices}
+end_date <- Sys.Date()
+start_date <- end_date - 365 * 3
+
+getSymbols(
+  Symbols = etf_symbols,
+  src = "yahoo",
+  from = start_date,
+  to = end_date,
+  auto.assign = TRUE,
+  warnings = FALSE
+)
+
+prices_list <- lapply(etf_symbols, function(sym) Ad(get(sym)))
+adjusted_prices <- do.call(merge, prices_list)
+colnames(adjusted_prices) <- etf_symbols
+adjusted_prices <- na.omit(adjusted_prices)
+
+head(adjusted_prices)
+tail(adjusted_prices)
+```
+
+## Compute returns and summary statistics
+
+Daily returns are computed from adjusted prices. Summary statistics are annualized using a 252-trading-day convention.
+
+```{r compute-returns-and-summary-statistics}
+returns <- na.omit(Return.calculate(adjusted_prices, method = "discrete"))
+
+summary_stats <- data.frame(
+  ETF = colnames(returns),
+  Annualized_Return = as.numeric(Return.annualized(returns, scale = 252, geometric = TRUE)),
+  Annualized_Volatility = as.numeric(StdDev.annualized(returns, scale = 252)),
+  Sharpe_Ratio = as.numeric(SharpeRatio.annualized(returns, Rf = 0, scale = 252, geometric = TRUE)),
+  Max_Drawdown = as.numeric(maxDrawdown(returns))
+)
+
+summary_stats$Annualized_Return <- round(summary_stats$Annualized_Return, 4)
+summary_stats$Annualized_Volatility <- round(summary_stats$Annualized_Volatility, 4)
+summary_stats$Sharpe_Ratio <- round(summary_stats$Sharpe_Ratio, 4)
+summary_stats$Max_Drawdown <- round(summary_stats$Max_Drawdown, 4)
+
+knitr::kable(summary_stats, caption = "Summary statistics for individual ETFs")
+```
+
+## Correlation heatmap
+
+```{r correlation-heatmap, fig.width=9, fig.height=7}
+correlation_matrix <- cor(returns, use = "complete.obs")
+
+corrplot(
+  correlation_matrix,
+  method = "color",
+  type = "upper",
+  order = "hclust",
+  addCoef.col = "black",
+  tl.col = "black",
+  tl.srt = 45,
+  number.cex = 0.7,
+  mar = c(0, 0, 1, 0),
+  title = "Correlation Heatmap of ETF Daily Returns"
+)
+```
+
+The heatmap helps identify diversification opportunities. Equity ETFs tend to cluster together, while fixed income and gold may provide lower correlation relative to equities.
+
+## Split into training and test periods
+
+The sample is divided chronologically so that the first two-thirds of the data form the training period and the final one-third forms the test period.
+
+```{r split-into-training-and-test-periods}
+split_index <- floor(0.67 * nrow(returns))
+
+train_returns <- returns[1:split_index, ]
+test_returns  <- returns[(split_index + 1):nrow(returns), ]
+
+train_start <- first(index(train_returns))
+train_end   <- last(index(train_returns))
+test_start  <- first(index(test_returns))
+test_end    <- last(index(test_returns))
+
+split_table <- data.frame(
+  Period = c("Training", "Test"),
+  Start = c(as.character(train_start), as.character(test_start)),
+  End = c(as.character(train_end), as.character(test_end)),
+  Observations = c(nrow(train_returns), nrow(test_returns))
+)
+
+knitr::kable(split_table, caption = "Training and test sample split")
+```
+
+## Build portfolios
+
+### Mean-Variance
+
+The mean-variance portfolio is estimated on the training sample using long-only and full-investment constraints.
+
+```{r build-mean-variance-portfolio}
+portfolio_spec <- portfolio.spec(assets = colnames(train_returns))
+portfolio_spec <- add.constraint(portfolio_spec, type = "full_investment")
+portfolio_spec <- add.constraint(portfolio_spec, type = "long_only")
+portfolio_spec <- add.constraint(portfolio_spec, type = "box", min = 0, max = 0.35)
+portfolio_spec <- add.objective(portfolio_spec, type = "return", name = "mean")
+portfolio_spec <- add.objective(portfolio_spec, type = "risk", name = "var")
+
+mv_optimized <- optimize.portfolio(
+  R = train_returns,
+  portfolio = portfolio_spec,
+  optimize_method = "ROI",
+  trace = FALSE
+)
+
+weights_mv <- round(extractWeights(mv_optimized), 6)
+weights_mv
+```
+
+### Equal Weight
+
+```{r build-equal-weight-portfolio}
+weights_ew <- rep(1 / ncol(train_returns), ncol(train_returns))
+names(weights_ew) <- colnames(train_returns)
+round(weights_ew, 6)
+```
+
+### Risk Parity
+
+The risk parity portfolio is estimated from the training-period covariance matrix.
+
+```{r build-risk-parity-portfolio}
+library(riskParityPortfolio)
+
+cov_train <- cov(train_returns, use = "complete.obs")
+
+rp_fit <- riskParityPortfolio(Sigma = cov_train)
+
+weights_rp <- as.numeric(rp_fit$w)
+names(weights_rp) <- colnames(train_returns)
+
+# normalize weights
+weights_rp <- weights_rp / sum(weights_rp)
+
+round(weights_rp, 6)
+```
+
+### 60/40
+
+The 60/40 benchmark allocates 60% equally across the equity-oriented ETFs (SPY, QQQ, IWM, VEA, VWO, VNQ) and 40% equally across the bond ETFs (AGG, TLT, LQD). GLD is excluded from this benchmark.
+
+```{r build-6040-portfolio}
+equity_assets <- c("SPY", "QQQ", "IWM", "VEA", "VWO", "VNQ")
+bond_assets   <- c("AGG", "TLT", "LQD")
+
+weights_6040 <- rep(0, ncol(train_returns))
+names(weights_6040) <- colnames(train_returns)
+weights_6040[equity_assets] <- 0.60 / length(equity_assets)
+weights_6040[bond_assets]   <- 0.40 / length(bond_assets)
+round(weights_6040, 6)
+```
+
+## Portfolio weights table
+
+```{r portfolio-weights-table}
+weights_table <- data.frame(
+  ETF = colnames(train_returns),
+  Mean_Variance = as.numeric(weights_mv[colnames(train_returns)]),
+  Equal_Weight = as.numeric(weights_ew[colnames(train_returns)]),
+  Risk_Parity = as.numeric(weights_rp[colnames(train_returns)]),
+  Benchmark_60_40 = as.numeric(weights_6040[colnames(train_returns)])
+)
+
+weights_table[, -1] <- round(weights_table[, -1], 4)
+knitr::kable(weights_table, caption = "Portfolio weights by strategy")
+```
+
+## Backtest on test period
+
+Each portfolio is applied only to the test-period returns so that performance reflects out-of-sample evaluation.
+
+```{r backtest-on-test-period}
+ret_mv <- Return.portfolio(R = test_returns, weights = weights_mv, rebalance_on = NA)
+ret_ew <- Return.portfolio(R = test_returns, weights = weights_ew, rebalance_on = NA)
+ret_rp <- Return.portfolio(R = test_returns, weights = weights_rp, rebalance_on = NA)
+ret_6040 <- Return.portfolio(R = test_returns, weights = weights_6040, rebalance_on = NA)
+
+portfolio_returns <- na.omit(merge(ret_mv, ret_ew, ret_rp, ret_6040))
+colnames(portfolio_returns) <- c("Mean-Variance", "Equal Weight", "Risk Parity", "60/40")
+
+head(portfolio_returns)
+```
+
+## Performance table
+
+The following table reports annualized return, annualized volatility, Sharpe ratio, and maximum drawdown for the four portfolio strategies during the test period.
+
+```{r performance-table}
+performance_table <- data.frame(
+  Strategy = colnames(portfolio_returns),
+  Annualized_Return = as.numeric(Return.annualized(portfolio_returns, scale = 252, geometric = TRUE)),
+  Volatility = as.numeric(StdDev.annualized(portfolio_returns, scale = 252)),
+  Sharpe_Ratio = as.numeric(SharpeRatio.annualized(portfolio_returns, Rf = 0, scale = 252, geometric = TRUE)),
+  Max_Drawdown = as.numeric(maxDrawdown(portfolio_returns))
+)
+
+performance_table$Annualized_Return <- round(performance_table$Annualized_Return, 4)
+performance_table$Volatility <- round(performance_table$Volatility, 4)
+performance_table$Sharpe_Ratio <- round(performance_table$Sharpe_Ratio, 4)
+performance_table$Max_Drawdown <- round(performance_table$Max_Drawdown, 4)
+
+knitr::kable(performance_table, caption = "Out-of-sample performance of portfolio strategies")
+```
+
+## Cumulative return chart
+
+```{r cumulative-return-chart, fig.width=9, fig.height=6}
+chart.CumReturns(
+  portfolio_returns,
+  wealth.index = TRUE,
+  legend.loc = "topleft",
+  main = "Out-of-Sample Cumulative Returns of Portfolio Strategies",
+  ylab = "Growth of $1"
+)
+```
+
+The cumulative return chart provides a visual comparison of how one dollar invested in each strategy would have evolved during the test period. Because the weights were estimated on the training period and then applied to new data, the backtest gives a cleaner view of relative performance than an in-sample comparison would.
+
+## Interpretation
+
+This framework allows the four strategies to be compared on a consistent out-of-sample basis. Mean-variance optimization targets the tradeoff between expected return and variance, equal weight serves as a simple and transparent benchmark, risk parity emphasizes balanced risk contribution, and the 60/40 allocation provides a familiar traditional portfolio reference point. Together, these approaches illustrate how portfolio construction choices can materially affect risk-adjusted performance.
+
+## AI documentation
+
+Below are the six prompts used in developing this assignment, along with the corresponding ChatGPT conversation links.
+
+### Prompt 1
+
+**Prompt:**
+"Can you write R code using quantmod to download adjusted closing prices from Yahoo Finance for the following ETFs over the last 3 years: SPY, QQQ, IWM, VEA, VWO, AGG, TLT, LQD, VNQ, and GLD. Please make sure to organize the code clearly and include package installation commands."
+
+**Link:** [ChatGPT Conversation](https://chatgpt.com/share/69e53ea2-e08c-83ea-bc5c-443398df8c46)
+
+### Prompt 2
+
+**Prompt:**
+"Using the downloaded ETF price data for SPY, QQQ, IWM, VEA, VWO, AGG, TLT, LQD, VNQ, and GLD, write R code to calculate daily log returns, annualized returns, annualized volatility, and a correlation matrix. Also include a correlation heatmap and a cumulative returns chart."
+
+**Link:** [ChatGPT Conversation](https://chatgpt.com/share/69e53ea2-e08c-83ea-bc5c-443398df8c46)
+
+### Prompt 3
+
+**Prompt:**
+"I want you to write R code for a mean-variance optimized portfolio using PortfolioAnalytics and I want it to align to the results of my initial prompt."
+
+**Link:** [ChatGPT Conversation](https://chatgpt.com/share/69e54444-163c-83ea-9d5c-27a794c7aeac)
+
+### Prompt 4
+
+**Prompt:**
+"Now, help me backtest the optimized portfolio against an equal-weight portfolio and a 60/40 benchmark."
+
+**Link:** [ChatGPT Conversation](https://chatgpt.com/share/69e54735-17d8-83ea-a2b9-9c53fbf04aa9)
+
+### Prompt 5
+
+**Prompt:**
+"Create a cumulative returns chart and performance table using PerformanceAnalytics. Make it the continuation of the discussion for the ETF setup: SPY, QQQ, IWM, VEA, VWO, AGG, TLT, LQD, VNQ, and GLD over the last 3 years, using adjusted prices from Yahoo Finance."
+
+**Link:** [ChatGPT Conversation](https://chatgpt.com/share/69e54aba-3c04-83ea-9416-b3bd9418670a)
+
+### Prompt 6
+
+**Prompt:**
+"I want you to explain the limitations of an in-sample portfolio backtest in plain academic language."
+
+**Link:** [ChatGPT Conversation](https://chatgpt.com/share/69e54b62-7c80-83ea-a08e-859acd03f3a2)
+
+### Reflection on AI use
+
+AI was used to help structure the coding workflow, refine debugging steps, and improve the clarity of the analytical presentation. The final notebook was reorganized into a single clean workflow so that package installation, data download, return calculations, portfolio construction, and backtesting appear only once in a logical sequence. I reviewed the generated code, consolidated repeated sections, and kept only the final components that directly support the assignment objectives.
