@@ -595,6 +595,8 @@ cat("Sharpe Ratio (MV Portfolio): ",
 
 Now, help me backtest the optimized portfolio against an equal-weight portfolio and a 60/40 benchmark
 
+[ChatGPT](https://chatgpt.com/share/69e54735-17d8-83ea-a2b9-9c53fbf04aa9)
+
 ```{r}
 ############################################################
 # STEP: Load Required Packages
@@ -800,3 +802,110 @@ barplot(
 )
 ```
 
+### 5TH AI Prompt
+
+Create a cumulative returns chart and performance table using PerformanceAnalytics Make it the continuation of the discussion for the ETF setup: SPY, QQQ, IWM, VEA, VWO, AGG, TLT, LQD, VNQ, and GLD over the last 3 years, using adjusted prices from Yahoo Finance. here's the link from our last convo 9backtesting portfolio strategies) https://chatgpt.com/share/69e54735-17d8-83ea-a2b9-9c53fbf04aa9
+
+[ChatGPT](https://chatgpt.com/share/69e54aba-3c04-83ea-9416-b3bd9418670a)
+
+```{r}
+############################################################
+# ETF Performance Analysis: Cumulative Returns + Performance Table
+# ETFs: SPY, QQQ, IWM, VEA, VWO, AGG, TLT, LQD, VNQ, GLD
+# Period: Last 3 Years
+# Data Source: Yahoo Finance
+############################################################
+
+# ---------------------------
+# 1. Install and load packages
+# ---------------------------
+pkgs <- c("quantmod", "PerformanceAnalytics", "xts")
+
+new_pkgs <- pkgs[!(pkgs %in% installed.packages()[, "Package"])]
+if (length(new_pkgs) > 0) install.packages(new_pkgs)
+
+library(quantmod)
+library(PerformanceAnalytics)
+library(xts)
+
+# ---------------------------
+# 2. Define ETF tickers
+# ---------------------------
+tickers <- c("SPY", "QQQ", "IWM", "VEA", "VWO", "AGG", "TLT", "LQD", "VNQ", "GLD")
+
+# ---------------------------
+# 3. Download adjusted prices from Yahoo Finance
+# ---------------------------
+getSymbols(Symbols = tickers, src = "yahoo", from = Sys.Date() - 365*3, auto.assign = TRUE)
+
+# ---------------------------
+# 4. Merge adjusted closing prices into one xts object
+# ---------------------------
+prices_list <- lapply(tickers, function(ticker) Ad(get(ticker)))
+prices_xts  <- do.call(merge, prices_list)
+colnames(prices_xts) <- tickers
+
+# Remove missing rows
+prices_xts <- na.omit(prices_xts)
+
+# ---------------------------
+# 5. Calculate daily log returns
+# ---------------------------
+returns_xts <- na.omit(Return.calculate(prices_xts, method = "log"))
+
+# ---------------------------
+# 6. Cumulative returns chart
+# ---------------------------
+chart.CumReturns(
+  returns_xts,
+  wealth.index = TRUE,
+  legend.loc = "topleft",
+  main = "Cumulative Returns of ETFs Over the Last 3 Years",
+  ylab = "Growth of $1",
+  lwd = 2
+)
+
+# ---------------------------
+# 7. Performance table using PerformanceAnalytics
+# ---------------------------
+# table.Stats gives a broad descriptive summary
+performance_stats <- table.Stats(returns_xts)
+print(round(performance_stats, 4))
+
+# ---------------------------
+# 8. Cleaner summary table with key portfolio metrics
+# ---------------------------
+annual_return <- Return.annualized(returns_xts)
+annual_vol    <- StdDev.annualized(returns_xts)
+sharpe_ratio  <- SharpeRatio.annualized(returns_xts, Rf = 0)
+max_drawdown  <- maxDrawdown(returns_xts)
+
+performance_summary <- data.frame(
+  ETF = rownames(annual_return),
+  Annualized_Return = round(as.numeric(annual_return[, 1]), 4),
+  Annualized_Volatility = round(as.numeric(annual_vol[, 1]), 4),
+  Sharpe_Ratio = round(as.numeric(sharpe_ratio[, 1]), 4),
+  Max_Drawdown = round(as.numeric(max_drawdown[, 1]), 4)
+)
+
+rownames(performance_summary) <- NULL
+
+cat("\n========================================\n")
+cat("Key Performance Summary Table\n")
+cat("========================================\n")
+print(performance_summary)
+
+# ---------------------------
+# 9. Optional full performance dashboard
+# ---------------------------
+charts.PerformanceSummary(
+  returns_xts,
+  main = "Performance Summary of ETFs Over the Last 3 Years"
+)
+```
+
+### 6TH AI Prompt
+
+I want you to explain the limitations of an in-sample portfolio backtest in plain academic language.
+
+[ChatGPT](https://chatgpt.com/share/69e54b62-7c80-83ea-a08e-859acd03f3a2)
