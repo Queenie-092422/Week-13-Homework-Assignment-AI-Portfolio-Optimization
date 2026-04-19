@@ -1,0 +1,802 @@
+---
+title: "AI Portfolio Optimization"
+author: "Monet Knupp"
+date: "2026-04-19"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    toc_collapsed: 
+      # collapsed: true
+      # smooth_scroll: true
+    theme: simplex
+  pdf_document:
+    toc: true
+---
+<style>
+p {text-align: justify;} h1.title { text-align: font-weight: bold; } 
+</style>
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### 1ST AI Prompt
+"Can you write R code using quantmod to download adjusted closing prices from Yahoo Finance for the following ETFs over the last 3 years: SPY, QQQ, IWM, VEA, VWO, AGG, TLT, LQD, VNQ, and GLD. Please make sure to organize the code clearly and include package installation commands."
+
+[ChatGPT](https://chatgpt.com/share/69e53ea2-e08c-83ea-bc5c-443398df8c46)
+
+
+```{r}
+############################################################
+# Download Adjusted Closing Prices for ETFs from Yahoo Finance
+# ETFs: SPY, QQQ, IWM, VEA, VWO, AGG, TLT, LQD, VNQ, GLD
+# Period: Last 3 Years
+############################################################
+
+# -----------------------------
+# Setup: Install & Load Packages
+# -----------------------------
+
+required_packages <- c("quantmod", "xts", "PerformanceAnalytics", "corrplot")
+
+# Set CRAN mirror (THIS FIXES YOUR ERROR)
+options(repos = c(CRAN = "https://cloud.r-project.org"))
+
+# Install missing packages only
+installed_packages <- rownames(installed.packages())
+
+for (pkg in required_packages) {
+  if (!(pkg %in% installed_packages)) {
+    install.packages(pkg)
+  }
+}
+
+# Load libraries
+library(quantmod)
+library(xts)
+library(PerformanceAnalytics)
+library(corrplot)
+
+# -----------------------------
+# 3. Define ETF tickers
+# -----------------------------
+etf_symbols <- c("SPY", "QQQ", "IWM", "VEA", "VWO",
+                 "AGG", "TLT", "LQD", "VNQ", "GLD")
+
+# -----------------------------
+# 4. Define date range
+# -----------------------------
+end_date <- Sys.Date()
+start_date <- end_date - 365 * 3
+
+# -----------------------------
+# 5. Download price data
+# -----------------------------
+getSymbols(Symbols = etf_symbols,
+           src = "yahoo",
+           from = start_date,
+           to = end_date,
+           auto.assign = TRUE)
+
+# -----------------------------
+# 6. Extract Adjusted Close prices
+# -----------------------------
+adjusted_prices_list <- lapply(etf_symbols, function(symbol) {
+  Ad(get(symbol))
+})
+
+# Rename each column to just the ticker symbol
+for (i in seq_along(adjusted_prices_list)) {
+  colnames(adjusted_prices_list[[i]]) <- etf_symbols[i]
+}
+
+# Merge all adjusted close series into one object
+adjusted_prices <- do.call(merge, adjusted_prices_list)
+
+# -----------------------------
+# 7. View results
+# -----------------------------
+head(adjusted_prices)
+tail(adjusted_prices)
+
+# Optional: check structure
+str(adjusted_prices)
+
+# -----------------------------
+# 8. Optional - Save to CSV
+# -----------------------------
+adjusted_prices_df <- data.frame(Date = index(adjusted_prices),
+                                 coredata(adjusted_prices))
+
+write.csv(adjusted_prices_df,
+          file = "etf_adjusted_prices_last_3_years.csv",
+          row.names = FALSE)
+
+# -----------------------------
+# 9. Optional - Plot prices
+# -----------------------------
+plot(adjusted_prices,
+     main = "Adjusted Closing Prices of Selected ETFs (Last 3 Years)",
+     cex.main = 1.2,     # controls title size (smaller = cleaner)
+     adj = 0.5)          # centers the title
+```
+
+**A slightly cleaner version for just the main task is this:**
+
+```{r cars}
+# Install packages if needed
+pkgs <- c("quantmod", "xts")
+new_pkgs <- pkgs[!(pkgs %in% rownames(installed.packages()))]
+if (length(new_pkgs) > 0) install.packages(new_pkgs)
+
+# Load libraries
+library(quantmod)
+library(xts)
+
+# ETF symbols
+symbols <- c("SPY", "QQQ", "IWM", "VEA", "VWO",
+             "AGG", "TLT", "LQD", "VNQ", "GLD")
+
+# Date range: last 3 years
+start_date <- Sys.Date() - 365 * 3
+end_date <- Sys.Date()
+
+# Download data
+getSymbols(symbols, src = "yahoo", from = start_date, to = end_date)
+
+# Extract adjusted close prices
+prices <- do.call(merge, lapply(symbols, function(sym) Ad(get(sym))))
+colnames(prices) <- symbols
+
+# Preview
+head(prices)
+tail(prices)
+```
+
+### 2ND. AI Prompt
+
+great! using the downloaded ETF price data for SPY, QQQ, IWM, VEA, VWO, AGG, TLT, LQD, VNQ, and GLD, write R code to calculate daily log returns, annualized returns, annualized volatility, and a correlation matrix. Also include a correlation heatmap and a cumulative returns chart.                                                                             
+
+Also, added few more prompt to fix the library issues and chart alignment, which will be seen at the end of the convo with chatgpt.
+
+[ChatGPT](https://chatgpt.com/share/69e53ea2-e08c-83ea-bc5c-443398df8c46)
+
+```{r}
+############################################################
+# ETF Return Analysis and Visualization
+# Assets: SPY, QQQ, IWM, VEA, VWO, AGG, TLT, LQD, VNQ, GLD
+# Measures:
+#  - Daily log returns
+#  - Annualized returns
+#  - Annualized volatility
+#  - Correlation matrix
+#  - Correlation heatmap
+#  - Cumulative returns chart
+############################################################
+
+# ----------------------------------------------------------
+# 1. Install required packages
+# ----------------------------------------------------------
+required_packages <- c("quantmod", "xts", "PerformanceAnalytics", "corrplot")
+
+installed_packages <- rownames(installed.packages())
+
+for (pkg in required_packages) {
+  if (!(pkg %in% installed_packages)) {
+    install.packages(pkg)
+  }
+}
+
+# ----------------------------------------------------------
+# 2. Load libraries
+# ----------------------------------------------------------
+library(quantmod)
+library(xts)
+library(PerformanceAnalytics)
+library(corrplot)
+
+# ----------------------------------------------------------
+# 3. Define ETF tickers
+# ----------------------------------------------------------
+etf_symbols <- c("SPY", "QQQ", "IWM", "VEA", "VWO",
+                 "AGG", "TLT", "LQD", "VNQ", "GLD")
+
+# ----------------------------------------------------------
+# 4. Set date range (last 3 years)
+# ----------------------------------------------------------
+end_date <- Sys.Date()
+start_date <- end_date - 365 * 3
+
+# ----------------------------------------------------------
+# 5. Download ETF price data from Yahoo Finance
+# ----------------------------------------------------------
+getSymbols(Symbols = etf_symbols,
+           src = "yahoo",
+           from = start_date,
+           to = end_date,
+           auto.assign = TRUE)
+
+# ----------------------------------------------------------
+# 6. Extract Adjusted Closing Prices
+# ----------------------------------------------------------
+adjusted_prices_list <- lapply(etf_symbols, function(symbol) {
+  Ad(get(symbol))
+})
+
+# Rename each column with ticker symbol
+for (i in seq_along(adjusted_prices_list)) {
+  colnames(adjusted_prices_list[[i]]) <- etf_symbols[i]
+}
+
+# Merge into one xts object
+adjusted_prices <- do.call(merge, adjusted_prices_list)
+
+# Preview price data
+head(adjusted_prices)
+tail(adjusted_prices)
+
+# ----------------------------------------------------------
+# 7. Calculate Daily Log Returns
+# ----------------------------------------------------------
+log_returns <- na.omit(Return.calculate(adjusted_prices, method = "log"))
+
+# Preview return data
+head(log_returns)
+tail(log_returns)
+
+# ----------------------------------------------------------
+# 8. Calculate Annualized Return and Volatility
+# ----------------------------------------------------------
+annualized_returns <- apply(log_returns, 2, Return.annualized, scale = 252)
+annualized_volatility <- apply(log_returns, 2, StdDev.annualized, scale = 252)
+
+# Combine into one summary table
+summary_stats <- data.frame(
+  ETF = colnames(log_returns),
+  Annualized_Return = as.numeric(annualized_returns),
+  Annualized_Volatility = as.numeric(annualized_volatility)
+)
+
+print(summary_stats)
+
+# Optional: format as percentages
+summary_stats$Annualized_Return <- round(summary_stats$Annualized_Return * 100, 2)
+summary_stats$Annualized_Volatility <- round(summary_stats$Annualized_Volatility * 100, 2)
+
+print(summary_stats)
+
+# ----------------------------------------------------------
+# 9. Correlation Matrix
+# ----------------------------------------------------------
+correlation_matrix <- cor(log_returns, use = "complete.obs")
+
+print(correlation_matrix)
+
+# ----------------------------------------------------------
+# 10. Correlation Heatmap
+# ----------------------------------------------------------
+corrplot(correlation_matrix,
+         method = "color",
+         type = "upper",
+         order = "hclust",
+         addCoef.col = "black",
+         tl.col = "black",
+         tl.srt = 45,
+         number.cex = 0.7,
+         mar = c(0, 0, 1, 0),
+         title = "Correlation Heatmap of Daily Log Returns")
+
+# ----------------------------------------------------------
+# 11. Cumulative Returns Chart
+# ----------------------------------------------------------
+chart.CumReturns(log_returns,
+                 wealth.index = TRUE,
+                 legend.loc = "topleft",
+                 main = "Cumulative Returns of ETFs (Last 3 Years)")
+
+# ----------------------------------------------------------
+# 12. Optional: Save outputs
+# ----------------------------------------------------------
+write.csv(summary_stats,
+          file = "etf_summary_statistics.csv",
+          row.names = FALSE)
+
+write.csv(correlation_matrix,
+          file = "etf_correlation_matrix.csv",
+          row.names = TRUE)
+```
+
+### 3RD AI Prompt
+
+I want you to Write R code for a mean-variance optimized portfolio using PortfolioAnalytics and I want it to align to the results of my initial prompt  "https://chatgpt.com/share/69e53ea2-e08c-83ea-bc5c-443398df8c46"
+
+[ChatGPT](https://chatgpt.com/share/69e54444-163c-83ea-9d5c-27a794c7aeac)
+
+
+```{r}
+############################################################
+# Mean-Variance Optimized Portfolio using PortfolioAnalytics
+# ETFs: SPY, QQQ, IWM, VEA, VWO, AGG, TLT, LQD, VNQ, GLD
+# Data Source: Yahoo Finance
+# Horizon: Last 3 Years
+############################################################
+
+# =========================
+# 1. Install and load packages
+# =========================
+required_packages <- c(
+  "quantmod",
+  "PerformanceAnalytics",
+  "PortfolioAnalytics",
+  "ROI",
+  "ROI.plugin.quadprog",
+  "ROI.plugin.glpk",
+  "xts",
+  "zoo",
+  "ggplot2",
+  "reshape2",
+  "scales"
+)
+
+installed_packages <- rownames(installed.packages())
+
+for (pkg in required_packages) {
+  if (!(pkg %in% installed_packages)) {
+    install.packages(pkg, dependencies = TRUE)
+  }
+}
+
+library(quantmod)
+library(PerformanceAnalytics)
+library(PortfolioAnalytics)
+library(ROI)
+library(ROI.plugin.quadprog)
+library(ROI.plugin.glpk)
+library(xts)
+library(zoo)
+library(ggplot2)
+library(reshape2)
+library(scales)
+
+# =========================
+# 2. Define ETF universe and download data
+# =========================
+etfs <- c("SPY", "QQQ", "IWM", "VEA", "VWO", "AGG", "TLT", "LQD", "VNQ", "GLD")
+
+start_date <- Sys.Date() - 365 * 3
+end_date   <- Sys.Date()
+
+getSymbols(Symbols = etfs,
+           src = "yahoo",
+           from = start_date,
+           to = end_date,
+           auto.assign = TRUE,
+           warnings = FALSE)
+
+# =========================
+# 3. Extract Adjusted Close prices and merge
+# =========================
+price_list <- lapply(etfs, function(ticker) Ad(get(ticker)))
+prices <- do.call(merge, price_list)
+colnames(prices) <- etfs
+
+# Remove rows with all missing values, then carry forward/backward if needed
+prices <- prices[!apply(is.na(prices), 1, all), ]
+prices <- na.locf(prices, na.rm = FALSE)
+prices <- na.locf(prices, fromLast = TRUE)
+
+# =========================
+# 4. Compute daily log returns
+# =========================
+returns <- na.omit(Return.calculate(prices, method = "log"))
+colnames(returns) <- etfs
+
+# =========================
+# 5. Summary statistics
+# =========================
+annualized_returns <- Return.annualized(returns, geometric = TRUE)
+annualized_vol     <- StdDev.annualized(returns)
+cor_matrix         <- cor(returns, use = "complete.obs")
+
+cat("Annualized Returns:\n")
+print(round(annualized_returns, 4))
+
+cat("\nAnnualized Volatility:\n")
+print(round(annualized_vol, 4))
+
+cat("\nCorrelation Matrix:\n")
+print(round(cor_matrix, 3))
+
+# =========================
+# 6. Build Mean-Variance Portfolio Specification
+# =========================
+portfolio_spec <- portfolio.spec(assets = colnames(returns))
+
+# Full investment constraint
+portfolio_spec <- add.constraint(
+  portfolio = portfolio_spec,
+  type = "full_investment"
+)
+
+# Long-only constraint
+portfolio_spec <- add.constraint(
+  portfolio = portfolio_spec,
+  type = "long_only"
+)
+
+# Optional box constraint to avoid overly concentrated weights
+portfolio_spec <- add.constraint(
+  portfolio = portfolio_spec,
+  type = "box",
+  min = 0,
+  max = 0.35
+)
+
+# Mean objective: maximize expected return
+portfolio_spec <- add.objective(
+  portfolio = portfolio_spec,
+  type = "return",
+  name = "mean"
+)
+
+# Risk objective: minimize portfolio variance
+portfolio_spec <- add.objective(
+  portfolio = portfolio_spec,
+  type = "risk",
+  name = "var"
+)
+
+# =========================
+# 7. Optimize the portfolio
+# =========================
+opt_mv <- optimize.portfolio(
+  R = returns,
+  portfolio = portfolio_spec,
+  optimize_method = "ROI",
+  trace = TRUE
+)
+
+# Extract optimal weights
+mv_weights <- extractWeights(opt_mv)
+
+cat("\nMean-Variance Optimal Weights:\n")
+print(round(mv_weights, 4))
+
+# =========================
+# 8. Portfolio returns
+# =========================
+mv_portfolio_returns <- Return.portfolio(
+  R = returns,
+  weights = mv_weights,
+  rebalance_on = "months"
+)
+
+colnames(mv_portfolio_returns) <- "MeanVariance_Portfolio"
+
+# =========================
+# 9. Compare against Equal Weight portfolio
+# =========================
+equal_weights <- rep(1 / length(etfs), length(etfs))
+names(equal_weights) <- etfs
+
+ew_portfolio_returns <- Return.portfolio(
+  R = returns,
+  weights = equal_weights,
+  rebalance_on = "months"
+)
+
+colnames(ew_portfolio_returns) <- "EqualWeight_Portfolio"
+
+portfolio_compare <- na.omit(merge(mv_portfolio_returns, ew_portfolio_returns))
+
+# =========================
+# 10. Performance summary
+# =========================
+cat("\nPortfolio Performance Comparison:\n")
+
+comparison_stats <- rbind(
+  "Annualized Return" = Return.annualized(portfolio_compare, geometric = TRUE),
+  "Annualized Volatility" = StdDev.annualized(portfolio_compare),
+  "Sharpe Ratio" = SharpeRatio.annualized(portfolio_compare, Rf = 0, geometric = TRUE)
+)
+
+print(round(comparison_stats, 4))
+
+# =========================
+# 11. Efficient Frontier
+# =========================
+frontier <- create.EfficientFrontier(
+  R = returns,
+  portfolio = portfolio_spec,
+  type = "mean-StdDev",
+  n.portfolios = 25
+)
+
+chart.EfficientFrontier(frontier,
+                        match.col = "StdDev",
+                        n.portfolios = 25,
+                        main = "Efficient Frontier")
+
+# =========================
+# 12. Cumulative returns chart
+# =========================
+charts.PerformanceSummary(
+  portfolio_compare,
+  main = "Mean-Variance vs Equal-Weight Portfolio"
+)
+
+# =========================
+# 13. Correlation heatmap
+# =========================
+cor_df <- melt(cor_matrix)
+colnames(cor_df) <- c("ETF1", "ETF2", "Correlation")
+
+ggplot(cor_df, aes(x = ETF1, y = ETF2, fill = Correlation)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = round(Correlation, 2)), size = 3) +
+  scale_fill_gradient2(low = "steelblue", mid = "white", high = "darkred",
+                       midpoint = 0, limits = c(-1, 1)) +
+  labs(
+    title = "Correlation Heatmap of ETF Daily Log Returns",
+    x = NULL,
+    y = NULL
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+# =========================
+# 14. Plot portfolio weights
+# =========================
+weights_df <- data.frame(
+  ETF = names(mv_weights),
+  Weight = as.numeric(mv_weights)
+)
+
+ggplot(weights_df, aes(x = reorder(ETF, Weight), y = Weight)) +
+  geom_col() +
+  coord_flip() +
+  scale_y_continuous(labels = percent_format(accuracy = 1)) +
+  labs(
+    title = "Mean-Variance Optimized Portfolio Weights",
+    x = NULL,
+    y = "Portfolio Weight"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold")
+  )
+
+# =========================
+# 15. Optional: Display top-level summary neatly
+# =========================
+cat("\n=============================\n")
+cat("MEAN-VARIANCE PORTFOLIO SUMMARY\n")
+cat("=============================\n")
+
+cat("\nOptimal Weights:\n")
+print(round(mv_weights, 4))
+
+cat("\nAnnualized Return (MV Portfolio): ",
+    round(as.numeric(Return.annualized(mv_portfolio_returns, geometric = TRUE)), 4), "\n", sep = "")
+cat("Annualized Volatility (MV Portfolio): ",
+    round(as.numeric(StdDev.annualized(mv_portfolio_returns)), 4), "\n", sep = "")
+cat("Sharpe Ratio (MV Portfolio): ",
+    round(as.numeric(SharpeRatio.annualized(mv_portfolio_returns, Rf = 0, geometric = TRUE)), 4), "\n", sep = "")
+```
+
+### 4TH AI Prompt
+
+Now, help me backtest the optimized portfolio against an equal-weight portfolio and a 60/40 benchmark
+
+```{r}
+############################################################
+# STEP: Load Required Packages
+############################################################
+
+pkgs <- c(
+  "quantmod",
+  "PerformanceAnalytics",
+  "PortfolioAnalytics",
+  "ROI",
+  "ROI.plugin.quadprog",
+  "xts",
+  "ggplot2",
+  "reshape2"
+)
+
+new_pkgs <- pkgs[!(pkgs %in% installed.packages()[, "Package"])]
+if (length(new_pkgs) > 0) install.packages(new_pkgs)
+
+lapply(pkgs, library, character.only = TRUE)
+
+############################################################
+# STEP: Define ETFs and Download Adjusted Prices
+############################################################
+
+symbols <- c("SPY", "QQQ", "IWM", "VEA", "VWO", "AGG", "TLT", "LQD", "VNQ", "GLD")
+
+start_date <- Sys.Date() - 365 * 3
+end_date   <- Sys.Date()
+
+getSymbols(symbols, src = "yahoo", from = start_date, to = end_date, auto.assign = TRUE)
+
+############################################################
+# STEP: Merge Adjusted Closing Prices
+############################################################
+
+prices <- do.call(merge, lapply(symbols, function(sym) Ad(get(sym))))
+colnames(prices) <- symbols
+prices <- na.omit(prices)
+
+############################################################
+# STEP: Calculate Daily Log Returns
+############################################################
+
+returns <- na.omit(Return.calculate(prices, method = "log"))
+
+############################################################
+# STEP: Mean-Variance Portfolio Optimization
+############################################################
+
+# Create portfolio specification
+port_spec <- portfolio.spec(assets = colnames(returns))
+
+# Add constraints
+port_spec <- add.constraint(portfolio = port_spec, type = "full_investment")
+port_spec <- add.constraint(portfolio = port_spec, type = "long_only")
+
+# Add objectives
+port_spec <- add.objective(portfolio = port_spec, type = "return", name = "mean")
+port_spec <- add.objective(portfolio = port_spec, type = "risk", name = "var")
+
+# Run optimization
+opt_portfolio <- optimize.portfolio(
+  R = returns,
+  portfolio = port_spec,
+  optimize_method = "ROI"
+)
+
+# Extract optimized weights
+opt_weights <- extractWeights(opt_portfolio)
+
+# Display optimized weights
+opt_weights_df <- data.frame(
+  ETF = names(opt_weights),
+  Weight = round(as.numeric(opt_weights), 4)
+)
+
+print(opt_weights_df)
+
+############################################################
+# STEP: Construct Equal-Weight Portfolio
+############################################################
+
+n_assets <- ncol(returns)
+
+weights_equal <- rep(1 / n_assets, n_assets)
+names(weights_equal) <- colnames(returns)
+
+ret_equal <- Return.portfolio(
+  R = returns,
+  weights = weights_equal,
+  rebalance_on = "months"
+)
+
+############################################################
+# STEP: Construct 60/40 Benchmark Portfolio
+############################################################
+
+# 60% allocated equally across equity ETFs
+# 40% allocated equally across bond ETFs
+# GLD is excluded from the traditional 60/40 benchmark
+
+stock_assets <- c("SPY", "QQQ", "IWM", "VEA", "VWO", "VNQ")
+bond_assets  <- c("AGG", "TLT", "LQD")
+
+weights_6040 <- rep(0, n_assets)
+names(weights_6040) <- colnames(returns)
+
+weights_6040[stock_assets] <- 0.60 / length(stock_assets)
+weights_6040[bond_assets]  <- 0.40 / length(bond_assets)
+
+ret_6040 <- Return.portfolio(
+  R = returns,
+  weights = weights_6040,
+  rebalance_on = "months"
+)
+
+############################################################
+# STEP: Construct Mean-Variance Optimized Portfolio Returns
+############################################################
+
+ret_mvo <- Return.portfolio(
+  R = returns,
+  weights = opt_weights,
+  rebalance_on = "months"
+)
+
+############################################################
+# STEP: Merge Portfolio Returns
+############################################################
+
+portfolio_returns <- merge(ret_mvo, ret_equal, ret_6040)
+colnames(portfolio_returns) <- c("Mean-Variance", "Equal Weight", "60/40")
+
+portfolio_returns <- na.omit(portfolio_returns)
+
+############################################################
+# STEP: Performance Summary Tables
+############################################################
+
+cat("\nAnnualized Return Statistics:\n")
+print(table.AnnualizedReturns(portfolio_returns))
+
+cat("\nRisk Metrics:\n")
+print(rbind(
+  AnnualizedStdDev = StdDev.annualized(portfolio_returns),
+  SharpeRatio = SharpeRatio.annualized(portfolio_returns, Rf = 0)
+))
+
+cat("\nMaximum Drawdown:\n")
+print(maxDrawdown(portfolio_returns))
+
+############################################################
+# STEP: Cumulative Returns Chart
+############################################################
+
+chart.CumReturns(
+  portfolio_returns,
+  legend.loc = "topleft",
+  main = "Cumulative Returns: Mean-Variance vs Equal Weight vs 60/40"
+)
+
+############################################################
+# STEP: Performance Summary Chart
+############################################################
+
+charts.PerformanceSummary(
+  portfolio_returns,
+  main = "Performance Summary of Portfolio Strategies"
+)
+
+############################################################
+# STEP: Correlation Heatmap of ETF Returns
+############################################################
+
+cor_mat <- cor(returns)
+cor_df <- melt(cor_mat)
+
+ggplot(cor_df, aes(x = Var1, y = Var2, fill = value)) +
+  geom_tile() +
+  geom_text(aes(label = round(value, 2)), size = 3) +
+  labs(
+    title = "Correlation Heatmap of ETF Daily Returns",
+    x = "",
+    y = "",
+    fill = "Correlation"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+############################################################
+# STEP: Plot Optimized Portfolio Weights
+############################################################
+
+barplot(
+  opt_weights,
+  main = "Mean-Variance Optimized Portfolio Weights",
+  col = "lightblue",
+  las = 2
+)
+```
+
